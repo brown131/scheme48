@@ -4,6 +4,7 @@ import Control.Monad
 import Numeric
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
+import Control.Applicative hiding ((<|>))
 
 data LispVal = Atom String
              | List [LispVal]
@@ -12,6 +13,7 @@ data LispVal = Atom String
              | Float Float
              | String String
              | Bool Bool
+             deriving (Read, Show)
          
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=>?@^_~"
@@ -40,7 +42,7 @@ parseAtom = do
 parseRadix :: Parser LispVal
 parseRadix = do
                prefix <- oneOf "dox"
-               x <- many (case prefix of
+               x <- many1 (case prefix of
                            'b' -> binDigit
                            'd' -> digit
                            'o' -> octDigit
@@ -62,22 +64,24 @@ parseCharLiteral = do
 
 parseFloat :: Parser LispVal
 parseFloat = do
-               n <- many digit
-               char '.'
-               e <- many digit
-               let ((f, _):_) = readFloat (n ++ "." ++ e)
+               n <- many1 digit <|> ((:) <$> char '-' <*> many1 digit)
+               e <- (:) <$> char '.' <*> many1 digit
+               let ((f, _):_) = readFloat (n ++ e)
                return $ Float f
 
 parseInteger :: Parser LispVal                
-parseInteger = many1 digit >>= (return . Number . read)
+parseInteger = do
+                  x <- many1 digit <|> ((:) <$> char '-' <*> many1 digit)
+                  notFollowedBy $ char '.'
+                  return $ Number $ read x
 
 parseNumber :: Parser LispVal                
-parseNumber = try parseFloat <|> try parseInteger
+parseNumber = try parseInteger <|> try parseFloat
 
 parseString :: Parser LispVal
 parseString = do
                 char '"'
-                x <- many $ noneOf "\""
+                x <- many1 $ noneOf "\""
                      <|> try (string "\\\"" >> return '"')
                      <|> try (string "\\n" >> return '\n')
                      <|> try (string "\\r" >> return '\r')
@@ -100,7 +104,7 @@ parseExpr = parseLiteral
 readExpr :: String -> String
 readExpr input = case parse parseExpr "lisp" input of
     Left err -> "No match: " ++ show err
-    Right x -> "Found value"
+    Right x -> "Found value: " ++ show x
     
 main :: IO ()
 main = do
