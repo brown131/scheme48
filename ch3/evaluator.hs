@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 import Control.Applicative hiding ((<|>), many)
 import Control.Monad
@@ -19,8 +20,10 @@ data LispVal = Atom String
              | Complex (Complex Double)
              | String String
              | Bool Bool
-             deriving (Read, Show)
+           deriving (Read, Show)
 
+--instance Show LispVal where show = showVal
+         
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 
@@ -88,6 +91,7 @@ readBin s = readBin' $ reverse s
 toDouble :: LispVal -> Double
 toDouble(Float f) = realToFrac f
 toDouble(Number n) = fromIntegral n
+toDouble(Ratio n) = fromRational n
 
 parseInteger :: Parser LispVal                
 parseInteger = do
@@ -172,27 +176,75 @@ parseUnquoted = do
                     return $ List [Atom "unquote", x]
     
 parseExpr :: Parser LispVal
-parseExpr = parseAtom
-            <|> parseLiteral
+parseExpr = parseLiteral
             <|> parseNumber
             <|> parseString
             <|> parseQuoted
             <|> parseBackquoted
             <|> parseUnquoted
+            <|> parseAtom
             <|> do char '('
                    x <- try parseList <|> parseDottedList
                    char ')'
                    return x
 
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop op params = Number $ foldl1 op $ map unpackNum params
+
+unpackNum :: LispVal -> Integer
+unpackNum (Number n) = n
+unpackNum (String n) = let parsed = reads n :: [(Integer, String)] in 
+                           if null parsed 
+                              then 0
+                              else fst $ parsed !! 0
+unpackNum (List [n]) = unpackNum n
+unpackNum _ = 0
+
+primitives :: [(String, [LispVal] -> LispVal)]
+primitives = [("+", numericBinop (+)),
+              ("-", numericBinop (-)),
+              ("*", numericBinop (*)),
+              ("/", numericBinop div),
+              ("mod", numericBinop mod),
+              ("quotient", numericBinop quot),
+              ("remainder", numericBinop rem)]
+
+apply :: String -> [LispVal] -> LispVal
+apply func args = maybe (Bool False) ($ args) $ lookup func primitives
+             
+eval :: LispVal -> LispVal
+eval val@(String _) = val
+eval val@(Float _) = val
+eval val@(Number _) = val
+eval val@(Ratio _) = val
+eval val@(Complex _) = val
+eval val@(Bool _) = val
+eval (List [Atom "quote", val]) = val
+eval (List (Atom func : args)) = apply func $ map eval args
+
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
 
-readExpr :: String -> String
+showVal :: LispVal -> String
+showVal (String contents) = "\"" ++ contents ++ "\""
+showVal (Float contents) = show contents
+showVal (Number contents) = show contents
+showVal (Ratio contents) = show contents
+showVal (Complex contents) = show contents
+showVal (Bool True) = "#t"
+showVal (Bool False) = "#f"
+showVal (Atom name) = name
+showVal (List contents) = "(" ++ unwordsList contents ++ ")"
+showVal (DottedList head tail) = "(" ++ unwordsList head ++ " . " ++ showVal tail ++ ")"
+showVal (Vector contents) = "#(" ++ unwordsList contents ++ ")"
+
+readExpr :: String -> LispVal
 readExpr input = case parse parseExpr "lisp" input of
-    Left err -> "No match: " ++ show err
-    Right x -> "Found " ++ show x
-    
+    Left err -> String $ "No match: " ++ show err
+    Right val -> val
+
+evaluator :: String -> IO ()
+evaluator x = (print .  eval  . readExpr) x
+
 main :: IO ()
-main = do
-          (expr:_) <- getArgs
-          putStrLn (readExpr expr)
+main = getArgs >>= print . eval . readExpr . head
