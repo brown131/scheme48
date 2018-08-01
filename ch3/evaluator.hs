@@ -94,7 +94,7 @@ toDouble(Ratio n) = fromRational n
 
 parseInteger :: Parser LispVal                
 parseInteger = do
-                  x <- many1 digit <|> (:) <$> char '-' <*> many1 digit
+                  x <- int; -- many1 digit <|> (:) <$> char '-' <*> many1 digit
                   notFollowedBy $ char '.' 
                   return $ Number $ read x
 
