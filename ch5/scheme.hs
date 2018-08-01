@@ -14,8 +14,7 @@ data LispVal = Atom String
              | List [LispVal]
              | Vector [LispVal]
              | DottedList [LispVal] LispVal
-             | Number Integer
-             | Float Float
+             | Number Float
              | Ratio Rational
              | Complex (Complex Double)
              | String String
@@ -67,7 +66,7 @@ parseRadix = do
                            'b' -> binDigit
                            'd' -> digit
                            'o' -> octDigit
-                            'x' -> hexDigit)
+                           'x' -> hexDigit)
                let ((n, _):_) = (case prefix of
                                   'b' -> readBin 
                                   'd' -> readDec 
@@ -103,20 +102,19 @@ readBin :: (Eq a, Num a) => ReadS a
 readBin s = readBin' $ reverse s
 
 toDouble :: LispVal -> Double
-toDouble(Float f) = realToFrac f
-toDouble(Number n) = fromIntegral n
+toDouble(Number n) = realToFrac n
 toDouble(Ratio n) = fromRational n
 
 parseInteger :: Parser LispVal                
 parseInteger = do
                   x <- many1 digit <|> (:) <$> char '-' <*> many1 digit
                   notFollowedBy $ char '.' 
-                  return $ Number $ read x
+                  return $ Number $ fromIntegral $ read x
 
 parseFloating :: Parser LispVal
 parseFloating = do
                   f <- sign <*> (floating3 True)
-                  return $ Float f
+                  return $ Number f
 
 parseRatio :: Parser LispVal
 parseRatio = do
@@ -192,7 +190,7 @@ parseExpr = parseLiteral
 
 {-| Evaluation -}
 
-unpackNum :: LispVal -> ThrowsError Integer
+unpackNum :: LispVal -> ThrowsError Float
 unpackNum (Number n) = return n
 unpackNum (String n) = let parsed = reads n in 
                            if null parsed 
@@ -211,7 +209,7 @@ unpackBool :: LispVal -> ThrowsError Bool
 unpackBool (Bool b) = return b
 unpackBool notBool  = throwError $ TypeMismatch "boolean" notBool
 
-numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
+numericBinop :: (Float -> Float -> Float) -> [LispVal] -> ThrowsError LispVal
 numericBinop op           []  = throwError $ NumArgs 2 []
 numericBinop op singleVal@[_] = throwError $ NumArgs 2 singleVal
 numericBinop op params        = mapM unpackNum params >>= return . Number . foldl1 op
@@ -223,10 +221,18 @@ boolBinop unpacker op args = if length args /= 2
                                      right <- unpacker $ args !! 1
                                      return $ Bool $ left `op` right
 
-
 numBoolBinop  = boolBinop unpackNum
 strBoolBinop  = boolBinop unpackStr
 boolBoolBinop = boolBinop unpackBool
+
+numMod :: Float -> Float -> Float
+numMod a b = fromIntegral $ mod (floor a) (floor b)
+
+numQuot :: Float -> Float -> Float
+numQuot a b = fromIntegral $ quot (floor a) (floor b)
+
+numRem :: Float -> Float -> Float
+numRem a b = fromIntegral $ rem (floor a) (floor b)
 
 car :: [LispVal] -> ThrowsError LispVal
 car [List (x : xs)]         = return x
@@ -281,7 +287,7 @@ primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives = [("+", numericBinop (+)),
               ("-", numericBinop (-)),
               ("*", numericBinop (*)),
-              ("/", numericBinop div),
+              ("/", numericBinop (/)),
               ("=", numBoolBinop (==)),
               ("<", numBoolBinop (<)),
               (">", numBoolBinop (>)),
@@ -295,9 +301,9 @@ primitives = [("+", numericBinop (+)),
               ("string>?", strBoolBinop (>)),
               ("string<=?", strBoolBinop (<=)),
               ("string>=?", strBoolBinop (>=)),
-              ("mod", numericBinop mod),
-              ("quotient", numericBinop quot),
-              ("remainder", numericBinop rem),
+              ("mod", numericBinop numMod),
+              ("quotient", numericBinop numQuot),
+              ("remainder", numericBinop numRem),
               ("car", car),
               ("cdr", cdr),
               ("cons", cons),
@@ -314,7 +320,6 @@ testValType :: String -> LispVal -> ThrowsError LispVal
 testValType "boolean?" (Bool _) = return $ Bool True
 testValType "char?" (String [_]) = return $ Bool True
 testValType "complex?" (Complex _) = return $ Bool True
-testValType "float?" (Float _) = return $ Bool True
 testValType "list?" (List _) = return $ Bool True
 testValType "number?" (Number _) = return $ Bool True
 testValType "pair?" (DottedList _ _) = return $ Bool True
@@ -326,7 +331,6 @@ testValType _ _ = return $ Bool False
 
 eval :: LispVal -> ThrowsError LispVal
 eval val@(String _) = return val
-eval val@(Float _) = return val
 eval val@(Number _) = return val
 eval val@(Ratio _) = return val
 eval val@(Complex _) = return val
@@ -359,7 +363,6 @@ unwordsList = unwords . map showVal
 
 showVal :: LispVal -> String
 showVal (String contents) = "\"" ++ contents ++ "\""
-showVal (Float contents) = show contents
 showVal (Number contents) = show contents
 showVal (Ratio contents) = show contents
 showVal (Complex contents) = show contents
