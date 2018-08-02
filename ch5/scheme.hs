@@ -93,17 +93,11 @@ parseLiteral = do
 
 {-| Parse Numbers -}
 
-readBin' :: (Eq a, Num a) => ReadS a
-readBin' ""     = [(0, "")]
-readBin' (x:[]) = [(if x == '1' then 1 else 0, "")]
-readBin' (x:xs) = [((if x == '1' then 1 else 0) + (2 * (fst $ head $ readBin' xs)), "")]
-
 readBin :: (Eq a, Num a) => ReadS a
 readBin s = readBin' $ reverse s
-
-toDouble :: LispVal -> Double
-toDouble(Number n) = realToFrac n
-toDouble(Ratio n) = fromRational n
+  where readBin' ""     = [(0, "")]
+        readBin' (x:[]) = [(if x == '1' then 1 else 0, "")]
+        readBin' (x:xs) = [((if x == '1' then 1 else 0) + (2 * (fst $ head $ readBin' xs)), "")]
 
 parseInteger :: Parser LispVal                
 parseInteger = do
@@ -130,6 +124,7 @@ parseComplex = do
                  y <- (try parseFloating <|> parseInteger)
                  char 'i' 
                  return $ Complex (toDouble x :+ toDouble y)
+                 where toDouble(Number n) = realToFrac n
                    
 parseNumber :: Parser LispVal                
 parseNumber = try parseRatio <|> try parseComplex <|> try parseInteger <|> try parseFloating
@@ -225,14 +220,13 @@ numBoolBinop  = boolBinop unpackNum
 strBoolBinop  = boolBinop unpackStr
 boolBoolBinop = boolBinop unpackBool
 
-numMod :: Float -> Float -> Float
-numMod a b = fromIntegral $ mod (floor a) (floor b)
+integralOp :: Integral a => (a -> a -> a) -> Float -> Float -> Float
+integralOp op a b = fromIntegral $ op (floor a) (floor b)
 
-numQuot :: Float -> Float -> Float
-numQuot a b = fromIntegral $ quot (floor a) (floor b)
-
-numRem :: Float -> Float -> Float
-numRem a b = fromIntegral $ rem (floor a) (floor b)
+integralBinop :: Integral a => (a -> a -> a) -> [LispVal] -> ThrowsError LispVal
+integralBinop op           []  = throwError $ NumArgs 2 []
+integralBinop op singleVal@[_] = throwError $ NumArgs 2 singleVal
+integralBinop op params        = mapM unpackNum params >>= return . Number . foldl1 (integralOp op)
 
 car :: [LispVal] -> ThrowsError LispVal
 car [List (x : xs)]         = return x
@@ -276,6 +270,11 @@ unpackEquals arg1 arg2 (AnyUnpacker unpacker) =
         `catchError` (const $ return False)
 
 equal :: [LispVal] -> ThrowsError LispVal
+equal [(List arg1), (List arg2)] = return $ Bool $ (length arg1 == length arg2) && 
+                                   (all equalPair $ zip arg1 arg2)
+     where equalPair (x1, x2) = case equal [x1, x2] of
+                                  Left err -> False
+                                  Right (Bool val) -> val
 equal [arg1, arg2] = do
       primitiveEquals <- liftM or $ mapM (unpackEquals arg1 arg2) 
                          [AnyUnpacker unpackNum, AnyUnpacker unpackStr, AnyUnpacker unpackBool]
@@ -301,9 +300,9 @@ primitives = [("+", numericBinop (+)),
               ("string>?", strBoolBinop (>)),
               ("string<=?", strBoolBinop (<=)),
               ("string>=?", strBoolBinop (>=)),
-              ("mod", numericBinop numMod),
-              ("quotient", numericBinop numQuot),
-              ("remainder", numericBinop numRem),
+              ("mod", integralBinop mod),
+              ("quotient", integralBinop quot),
+              ("remainder", integralBinop rem),
               ("car", car),
               ("cdr", cdr),
               ("cons", cons),
