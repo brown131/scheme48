@@ -319,10 +319,11 @@ testValType :: String -> LispVal -> ThrowsError LispVal
 testValType "boolean?" (Bool _) = return $ Bool True
 testValType "char?" (String [_]) = return $ Bool True
 testValType "complex?" (Complex _) = return $ Bool True
+testValType "integer?" (Number x) = return $ Bool $ x == fromInteger (floor x)
 testValType "list?" (List _) = return $ Bool True
-testValType "number?" (Number _) = return $ Bool True
 testValType "pair?" (DottedList _ _) = return $ Bool True
 testValType "rational?" (Ratio _) = return $ Bool True
+testValType "real?" (Number _) = return $ Bool True
 testValType "symbol?" (Atom _) = return $ Bool True
 testValType "string?" (String _) = return $ Bool True
 testValType "vector?" (Vector _) = return $ Bool True
@@ -340,11 +341,11 @@ eval (List [Atom "string->symbol", String val]) = return $ Atom val
 eval (List [Atom "boolean?", val]) = testValType "boolean?" val
 eval (List [Atom "char?", val]) = testValType "char?" val
 eval (List [Atom "complex?", val]) = testValType "complex?" val
-eval (List [Atom "float?", val]) = testValType "float?" val
+eval (List [Atom "integer?", val]) = testValType "integer?" val
 eval (List [Atom "list?", val]) = testValType "list?" val
-eval (List [Atom "number?", val]) = testValType "number?" val
 eval (List [Atom "pair?", val]) = testValType "pair?" val
 eval (List [Atom "rational?", val]) = testValType "rational?" val
+eval (List [Atom "real?", val]) = testValType "real?" val
 eval (List [Atom "string?", val]) = testValType "string?" val
 eval (List [Atom "symbol?", val]) = testValType "symbol?" val
 eval (List [Atom "vector?", val]) = testValType "vector?" val
