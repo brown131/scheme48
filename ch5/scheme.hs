@@ -4,6 +4,7 @@
 import Control.Monad
 import Control.Monad.Except
 import Data.Complex
+import Data.List
 import Data.Ratio
 import Numeric
 import System.Environment
@@ -204,6 +205,10 @@ unpackBool :: LispVal -> ThrowsError Bool
 unpackBool (Bool b) = return b
 unpackBool notBool  = throwError $ TypeMismatch "boolean" notBool
 
+unpackList :: LispVal -> ThrowsError [LispVal]
+unpackList (List x) = return x
+unpackList notList  = throwError $ TypeMismatch "list" notList
+
 numericBinop :: (Float -> Float -> Float) -> [LispVal] -> ThrowsError LispVal
 numericBinop op           []  = throwError $ NumArgs 2 []
 numericBinop op singleVal@[_] = throwError $ NumArgs 2 singleVal
@@ -349,11 +354,47 @@ eval (List [Atom "real?", val]) = testValType "real?" val
 eval (List [Atom "string?", val]) = testValType "string?" val
 eval (List [Atom "symbol?", val]) = testValType "symbol?" val
 eval (List [Atom "vector?", val]) = testValType "vector?" val
+
 eval (List [Atom "if", pred, conseq, alt]) = 
      do result <- eval pred
         case result of
              Bool False -> eval alt
              otherwise  -> eval conseq
+
+eval (List (Atom "cond" : clauses)) =
+     do
+        case find testClause clauses of
+          Just x  -> return $ case unpackList x of
+                                Left err -> Bool False
+                                Right (x : xs) -> xs !! 0
+          Nothing -> return $ Bool False
+        where testClause (List (x : xs)) =
+                case eval x of
+                  Right (Bool True) -> True
+                  otherwise -> False                              
+               
+-- TODO: Else clause
+eval (List (Atom "case" : keyVal : cases)) =
+     do
+        case find testCase cases of
+          Just x  -> return $ case unpackList x of
+                                Left err -> Bool False
+                                Right (x : xs) -> xs !! 0
+          Nothing -> return $ Bool False
+        where key = case eval keyVal of
+                      Right x -> x
+                      Left err -> Bool False
+                      
+              testTest t = case eqv [key, t] of
+                 Right (Bool True) -> True
+                 otherwise -> False
+
+              testCase (List ((Atom "else") : xs)) = True
+              testCase (List ((List x) : xs)) =
+                case find testTest x of
+                  Just _  -> True
+                  Nothing -> False                              
+  
 eval (List (Atom func : args)) = mapM eval args >>= apply func
 
 eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
