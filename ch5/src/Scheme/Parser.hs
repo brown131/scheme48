@@ -1,6 +1,6 @@
 module Scheme.Parser where
   
-import Control.Monad
+import Control.Monad.Except
 import Data.Complex
 import Data.Ratio
 import Numeric
@@ -153,3 +153,8 @@ parseExpr = parseLiteral
                    x <- try parseList <|> try parseDottedList
                    char ')'
                    return x
+
+readExpr :: String -> ThrowsError LispVal
+readExpr input = case parse parseExpr "lisp" input of
+     Left err -> throwError $ Parser err
+     Right val -> return val
