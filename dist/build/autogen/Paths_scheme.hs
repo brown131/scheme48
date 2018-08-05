@@ -29,12 +29,12 @@ version :: Version
 version = Version [0,1,0,0] []
 bindir, libdir, dynlibdir, datadir, libexecdir, sysconfdir :: FilePath
 
-bindir     = "/Users/scott/projects/scheme48/ch5/.cabal-sandbox/bin"
-libdir     = "/Users/scott/projects/scheme48/ch5/.cabal-sandbox/lib/x86_64-osx-ghc-8.0.2/scheme-0.1.0.0"
-dynlibdir  = "/Users/scott/projects/scheme48/ch5/.cabal-sandbox/lib/x86_64-osx-ghc-8.0.2"
-datadir    = "/Users/scott/projects/scheme48/ch5/.cabal-sandbox/share/x86_64-osx-ghc-8.0.2/scheme-0.1.0.0"
-libexecdir = "/Users/scott/projects/scheme48/ch5/.cabal-sandbox/libexec"
-sysconfdir = "/Users/scott/projects/scheme48/ch5/.cabal-sandbox/etc"
+bindir     = "/Users/scott/projects/scheme48/.cabal-sandbox/bin"
+libdir     = "/Users/scott/projects/scheme48/.cabal-sandbox/lib/x86_64-osx-ghc-8.0.2/scheme-0.1.0.0"
+dynlibdir  = "/Users/scott/projects/scheme48/.cabal-sandbox/lib/x86_64-osx-ghc-8.0.2"
+datadir    = "/Users/scott/projects/scheme48/.cabal-sandbox/share/x86_64-osx-ghc-8.0.2/scheme-0.1.0.0"
+libexecdir = "/Users/scott/projects/scheme48/.cabal-sandbox/libexec"
+sysconfdir = "/Users/scott/projects/scheme48/.cabal-sandbox/etc"
 
 getBinDir, getLibDir, getDynLibDir, getDataDir, getLibexecDir, getSysconfDir :: IO FilePath
 getBinDir = catchIO (getEnv "scheme_bindir") (\_ -> return bindir)

@@ -14,6 +14,13 @@ symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 spaces :: Parser ()
 spaces = skipMany1 space
 
+readExpr :: String -> ThrowsError LispVal
+readExpr input = case parse parseExpr "lisp" input of
+     Left err -> throwError $ Parser err
+     Right val -> return val
+
+{-| Parse Symbols -}
+
 parseAtom :: Parser LispVal
 parseAtom = do 
               first <- letter <|> symbol
@@ -153,8 +160,3 @@ parseExpr = parseLiteral
                    x <- try parseList <|> try parseDottedList
                    char ')'
                    return x
-
-readExpr :: String -> ThrowsError LispVal
-readExpr input = case parse parseExpr "lisp" input of
-     Left err -> throwError $ Parser err
-     Right val -> return val
