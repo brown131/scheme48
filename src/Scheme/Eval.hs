@@ -1,7 +1,10 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Scheme.Eval where
   
 import Control.Monad
 import Control.Monad.Except
+import Data.Char
 import Data.List
 import Scheme.Data
 import Scheme.Parser
@@ -50,7 +53,7 @@ strBoolBinop  = boolBinop unpackStr
 boolBoolBinop = boolBinop unpackBool
 
 integralOp :: Integral a => (a -> a -> a) -> Float -> Float -> Float
-integralOp op a b = fromIntegral $ op (floor a) (floor b)
+integralOp op a b = fromIntegral $ op (round a) (round b)
 
 integralBinop :: Integral a => (a -> a -> a) -> [LispVal] -> ThrowsError LispVal
 integralBinop op           []  = throwError $ NumArgs 2 []
@@ -148,7 +151,7 @@ testValType :: String -> LispVal -> ThrowsError LispVal
 testValType "boolean?" (Bool _) = return $ Bool True
 testValType "char?" (String [_]) = return $ Bool True
 testValType "complex?" (Complex _) = return $ Bool True
-testValType "integer?" (Number x) = return $ Bool $ x == fromInteger (floor x)
+testValType "integer?" (Number x) = return $ Bool $ x == fromInteger (round x)
 testValType "list?" (List _) = return $ Bool True
 testValType "pair?" (DottedList _ _) = return $ Bool True
 testValType "rational?" (Ratio _) = return $ Bool True
@@ -157,7 +160,7 @@ testValType "symbol?" (Atom _) = return $ Bool True
 testValType "string?" (String _) = return $ Bool True
 testValType "vector?" (Vector _) = return $ Bool True
 testValType _ _ = return $ Bool False
-
+                     
 eval :: LispVal -> ThrowsError LispVal
 eval val@(String _) = return val
 eval val@(Number _) = return val
@@ -165,8 +168,8 @@ eval val@(Ratio _) = return val
 eval val@(Complex _) = return val
 eval val@(Bool _) = return val
 eval (List [Atom "quote", val]) = return val
-eval (List [Atom "symbol->string", Atom val]) = return $ String val
-eval (List [Atom "string->symbol", String val]) = return $ Atom val
+
+{-| Type functions -}
 eval (List [Atom "boolean?", val]) = testValType "boolean?" val
 eval (List [Atom "char?", val]) = testValType "char?" val
 eval (List [Atom "complex?", val]) = testValType "complex?" val
@@ -179,18 +182,37 @@ eval (List [Atom "string?", val]) = testValType "string?" val
 eval (List [Atom "symbol?", val]) = testValType "symbol?" val
 eval (List [Atom "vector?", val]) = testValType "vector?" val
 
--- make-string
--- string-length
--- string-ref
--- string-set!
--- string-<? string->? string-<=? string->=?
--- string-ci<? string-ci>? string-ci<=? string-ci>=?
--- substring
--- string-append
--- string->list
--- list->string
--- string-copy
--- string-fill!
+{-| String functions -}
+eval (List [Atom "symbol->string", Atom val]) = return $ String val
+eval (List [Atom "string->symbol", String val]) = return $ Atom val
+eval (List [Atom "make-string", Number n, String c]) = return $ String $ take (round n) [(head c), (head c)..]
+eval (List [Atom "string-length", String val]) = return $ Number $ fromIntegral $ length val
+eval (List [Atom "string-ref", String val, Number k]) = return $ String $ [val !! (round k)]
+eval (List [Atom "string-set!", String val, Number k, String c]) =
+  return $ String $ take (round k) val ++ c ++ drop ((round k) + 1) val
+eval (List [Atom "string-<?", String val1, String val2]) = return $ Bool $ val1 < val2
+eval (List [Atom "string->?", String val1, String val2]) = return $ Bool $ val1 > val2
+eval (List [Atom "string-<=?", String val1, String val2]) = return $ Bool $ val1 <= val2
+eval (List [Atom "string->=?", String val1, String val2]) = return $ Bool $ val1 >= val2
+eval (List [Atom "string-ci<?", String val1, String val2]) =
+  return $ Bool $ (map toLower val1) < (map toLower val2)
+eval (List [Atom "string-ci>?", String val1, String val2]) =
+  return $ Bool $ (map toLower val1) > (map toLower val2)
+eval (List [Atom "string-ci<=?", String val1, String val2]) = 
+  return $ Bool $ (map toLower val1) <= (map toLower val2)
+eval (List [Atom "string-ci>=?", String val1, String val2]) =
+  return $ Bool $ (map toLower val1) >= (map toLower val2)
+eval (List [Atom "substring", String val, Number s, Number e]) =
+  return $ String $ take ((round e) - (round s) + 1) (drop (round s) val)
+eval (List [Atom "string-append", String val1, String val2]) = return $ String $ val1 ++ val2
+eval (List [Atom "string->list", String val]) = return $ List $ map (\c -> String [c]) val
+eval (List [Atom "string-copy", String val]) = return $ String $ val
+eval (List [Atom "string-fill!", String val, String c]) = return $ String $ take (length val) (repeat (head c))
+-- TODO Doesn't take quoted list.
+eval (List [Atom "list->string", List val]) =
+  return $ String $ concat $ map (\case 
+                                    String c -> c
+                                    x -> show (eval x)) val
 
 eval (List [Atom "if", pred, conseq, alt]) = 
      do result <- eval pred
