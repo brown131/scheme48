@@ -48,6 +48,16 @@ boolBinop unpacker op args = if length args /= 2
                                      right <- unpacker $ args !! 1
                                      return $ Bool $ left `op` right
 
+ciStringOp :: (String -> String -> Bool) -> String -> String -> Bool
+ciStringOp op a b = op (map toLower a) (map toLower b)
+
+ciStrBoolBinop :: (String -> String -> Bool) -> [LispVal] -> ThrowsError LispVal
+ciStrBoolBinop op args = if length args /= 2 
+                         then throwError $ NumArgs 2 args
+                         else do left <- unpackStr $ args !! 0
+                                 right <- unpackStr $ args !! 1
+                                 return $ Bool $ ciStringOp op left right
+
 numBoolBinop  = boolBinop unpackNum
 strBoolBinop  = boolBinop unpackStr
 boolBoolBinop = boolBinop unpackBool
@@ -132,6 +142,11 @@ primitives = [("+", numericBinop (+)),
               ("string>?", strBoolBinop (>)),
               ("string<=?", strBoolBinop (<=)),
               ("string>=?", strBoolBinop (>=)),
+              ("string-ci=?", ciStrBoolBinop (==)),
+              ("string-ci<?", ciStrBoolBinop (<)),
+              ("string-ci>?", ciStrBoolBinop (>)),
+              ("string-ci<=?", ciStrBoolBinop (<=)),
+              ("string-ci>=?", ciStrBoolBinop (>=)),
               ("mod", integralBinop mod),
               ("quotient", integralBinop quot),
               ("remainder", integralBinop rem),
@@ -160,6 +175,12 @@ testValType "symbol?" (Atom _) = return $ Bool True
 testValType "string?" (String _) = return $ Bool True
 testValType "vector?" (Vector _) = return $ Bool True
 testValType _ _ = return $ Bool False
+
+listToString :: LispVal -> ThrowsError LispVal
+listToString (List [Atom "quote", val]) = listToString val
+listToString (List val) = do
+                            strs <- mapM unpackStr val
+                            return $ String $ concat $ strs
                      
 eval :: LispVal -> ThrowsError LispVal
 eval val@(String _) = return val
@@ -190,18 +211,6 @@ eval (List [Atom "string-length", String val]) = return $ Number $ fromIntegral 
 eval (List [Atom "string-ref", String val, Number k]) = return $ String $ [val !! (round k)]
 eval (List [Atom "string-set!", String val, Number k, String c]) =
   return $ String $ take (round k) val ++ c ++ drop ((round k) + 1) val
-eval (List [Atom "string-<?", String val1, String val2]) = return $ Bool $ val1 < val2
-eval (List [Atom "string->?", String val1, String val2]) = return $ Bool $ val1 > val2
-eval (List [Atom "string-<=?", String val1, String val2]) = return $ Bool $ val1 <= val2
-eval (List [Atom "string->=?", String val1, String val2]) = return $ Bool $ val1 >= val2
-eval (List [Atom "string-ci<?", String val1, String val2]) =
-  return $ Bool $ (map toLower val1) < (map toLower val2)
-eval (List [Atom "string-ci>?", String val1, String val2]) =
-  return $ Bool $ (map toLower val1) > (map toLower val2)
-eval (List [Atom "string-ci<=?", String val1, String val2]) = 
-  return $ Bool $ (map toLower val1) <= (map toLower val2)
-eval (List [Atom "string-ci>=?", String val1, String val2]) =
-  return $ Bool $ (map toLower val1) >= (map toLower val2)
 eval (List [Atom "substring", String val, Number s, Number e]) =
   return $ String $ take ((round e) - (round s) + 1) (drop (round s) val)
 eval (List [Atom "string-append", String val1, String val2]) = return $ String $ val1 ++ val2
@@ -209,10 +218,7 @@ eval (List [Atom "string->list", String val]) = return $ List $ map (\c -> Strin
 eval (List [Atom "string-copy", String val]) = return $ String $ val
 eval (List [Atom "string-fill!", String val, String c]) = return $ String $ take (length val) (repeat (head c))
 -- TODO Doesn't take quoted list.
-eval (List [Atom "list->string", List val]) =
-  return $ String $ concat $ map (\case 
-                                    String c -> c
-                                    x -> show (eval x)) val
+eval (List [Atom "list->string", val]) = listToString val
 
 eval (List [Atom "if", pred, conseq, alt]) = 
      do result <- eval pred
