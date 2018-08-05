@@ -24,7 +24,8 @@ unpackNum notNum     = throwError $ TypeMismatch "number" notNum
 
 unpackStr :: LispVal -> ThrowsError String
 unpackStr (String s) = return s
-unpackStr (Number s) = return $ show s
+unpackStr (Number s) = return $ if s == fromInteger i then show i else show s
+                       where i = round s
 unpackStr (Bool s)   = return $ show s
 unpackStr notString  = throwError $ TypeMismatch "string" notString
 
@@ -217,7 +218,6 @@ eval (List [Atom "string-append", String val1, String val2]) = return $ String $
 eval (List [Atom "string->list", String val]) = return $ List $ map (\c -> String [c]) val
 eval (List [Atom "string-copy", String val]) = return $ String $ val
 eval (List [Atom "string-fill!", String val, String c]) = return $ String $ take (length val) (repeat (head c))
--- TODO Doesn't take quoted list.
 eval (List [Atom "list->string", val]) = listToString val
 
 eval (List [Atom "if", pred, conseq, alt]) = 

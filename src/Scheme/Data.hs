@@ -13,9 +13,6 @@ data LispVal = Atom String
              | Complex (Complex Double)
              | String String
              | Bool Bool
-             deriving (Show)
-
---instance Show LispVal where show = showVal
 
 data LispError = NumArgs Integer [LispVal]
                | TypeMismatch String LispVal
@@ -24,7 +21,6 @@ data LispError = NumArgs Integer [LispVal]
                | NotFunction String String
                | UnboundVar String String
                | Default String
-               deriving (Show)
 
 data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
 
