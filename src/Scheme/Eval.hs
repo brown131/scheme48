@@ -226,6 +226,12 @@ eval (List [Atom "if", pred, conseq, alt]) =
              Bool False -> eval alt
              otherwise  -> eval conseq
 
+eval (List [Atom "only-if", pred, conseq, alt]) = 
+     do result <- eval pred
+        case result of
+             Bool True -> eval conseq
+             otherwise -> eval alt
+
 eval (List (Atom "cond" : clauses)) =
      do
         case find testClause clauses of
