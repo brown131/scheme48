@@ -4,12 +4,50 @@ module Scheme.Eval where
   
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Extra
 import Data.Char
 import Data.List
+import Data.IORef
 import Scheme.Data
 import Scheme.Parser
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
+
+isBound :: Env -> String -> IO Bool
+isBound envRef var = readIORef envRef >>= return . maybe False (const True) . lookup var
+
+getVar :: Env -> String -> IOThrowsError LispVal
+getVar envRef var  =  do env <- liftIO $ readIORef envRef
+                         maybe (throwError $ UnboundVar "Getting an unbound variable" var)
+                               (liftIO . readIORef)
+                               (lookup var env)
+
+setVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+setVar envRef var value = do env <- liftIO $ readIORef envRef
+                             maybe (throwError $ UnboundVar "Setting an unbound variable" var)
+                                   (liftIO . (flip writeIORef value))
+                                   (lookup var env)
+                             return value
+
+defineVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+defineVar envRef var value = do
+     alreadyDefined <- liftIO $ isBound envRef var
+     if alreadyDefined
+        then setVar envRef var value >> return value
+        else liftIO $ do
+             valueRef <- newIORef value
+             env <- readIORef envRef
+             writeIORef envRef ((var, valueRef) : env)
+             return value
+
+bindVars :: Env -> [(String, LispVal)] -> IO Env
+bindVars envRef bindings = readIORef envRef >>= extendEnv bindings >>= newIORef
+     where extendEnv bindings env = liftM (++ env) (mapM addBinding bindings)
+           addBinding (var, value) = do ref <- newIORef value
+                                        return (var, ref)
+
+extractValue :: ThrowsError a -> a
+extractValue (Right val) = val
 
 {-| Evaluation -}
 
@@ -162,109 +200,233 @@ apply :: String -> [LispVal] -> ThrowsError LispVal
 apply func args = maybe (throwError $ NotFunction "Unrecognized primitive function args" func)
                         ($ args)
                         (lookup func primitives)
-             
-testValType :: String -> LispVal -> ThrowsError LispVal
-testValType "boolean?" (Bool _) = return $ Bool True
-testValType "char?" (String [_]) = return $ Bool True
-testValType "complex?" (Complex _) = return $ Bool True
-testValType "integer?" (Number x) = return $ Bool $ x == fromInteger (round x)
-testValType "list?" (List _) = return $ Bool True
-testValType "pair?" (DottedList _ _) = return $ Bool True
-testValType "rational?" (Ratio _) = return $ Bool True
-testValType "real?" (Number _) = return $ Bool True
-testValType "symbol?" (Atom _) = return $ Bool True
-testValType "string?" (String _) = return $ Bool True
-testValType "vector?" (Vector _) = return $ Bool True
-testValType _ _ = return $ Bool False
+
+testValType :: Env -> String -> LispVal -> IOThrowsError LispVal
+testValType env "boolean?" val = do
+  result <- eval env val
+  case result of
+     Bool _    -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "char?" val = do
+  result <- eval env val
+  case result of
+     String [_]  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "complex?" val = do
+  result <- eval env val
+  case result of
+     Complex _  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "integer?" val = do
+  result <- eval env val
+  case result of
+     Number x  -> return $ Bool $ x == fromInteger (round x)
+     otherwise -> return $ Bool False 
+testValType env "list?" val = do
+  result <- eval env val
+  case result of
+     List _  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "pair?" val = do
+  result <- eval env val
+  case result of
+     DottedList _ _ -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "rational?" val = do
+  result <- eval env val
+  case result of
+     Ratio _  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "real?" val = do
+  result <- eval env val
+  case result of
+     Number _  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "symbol?" val = do
+  result <- eval env val
+  case result of
+     Atom _  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "string?" val = do
+  result <- eval env val
+  case result of
+     String _  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env "vector?" val = do
+  result <- eval env val
+  case result of
+     Vector _  -> return $ Bool True
+     otherwise -> return $ Bool False 
+testValType env _ _ = return $ Bool False
 
 listToString :: LispVal -> ThrowsError LispVal
 listToString (List [Atom "quote", val]) = listToString val
 listToString (List val) = do
                             strs <- mapM unpackStr val
                             return $ String $ concat $ strs
-                     
-eval :: LispVal -> ThrowsError LispVal
-eval val@(String _) = return val
-eval val@(Number _) = return val
-eval val@(Ratio _) = return val
-eval val@(Complex _) = return val
-eval val@(Bool _) = return val
-eval (List [Atom "quote", val]) = return val
+
+eval :: Env -> LispVal -> IOThrowsError LispVal
+eval env val@(String _) = return val
+eval env val@(Number _) = return val
+eval env val@(Ratio _) = return val
+eval env val@(Complex _) = return val
+eval env val@(Bool _) = return val
+eval env (Atom id) = getVar env id
+eval env (List [Atom "quote", val]) = return val
 
 {-| Type functions -}
-eval (List [Atom "boolean?", val]) = testValType "boolean?" val
-eval (List [Atom "char?", val]) = testValType "char?" val
-eval (List [Atom "complex?", val]) = testValType "complex?" val
-eval (List [Atom "integer?", val]) = testValType "integer?" val
-eval (List [Atom "list?", val]) = testValType "list?" val
-eval (List [Atom "pair?", val]) = testValType "pair?" val
-eval (List [Atom "rational?", val]) = testValType "rational?" val
-eval (List [Atom "real?", val]) = testValType "real?" val
-eval (List [Atom "string?", val]) = testValType "string?" val
-eval (List [Atom "symbol?", val]) = testValType "symbol?" val
-eval (List [Atom "vector?", val]) = testValType "vector?" val
+eval env (List [Atom "boolean?", val]) = testValType env "boolean?" val
+eval env (List [Atom "char?", val]) = testValType env "char?" val
+eval env (List [Atom "complex?", val]) = testValType env "complex?" val
+eval env (List [Atom "integer?", val]) = testValType env "integer?" val
+eval env (List [Atom "list?", val]) = testValType env "list?" val
+eval env (List [Atom "pair?", val]) = testValType env "pair?" val
+eval env (List [Atom "rational?", val]) = testValType env "rational?" val
+eval env (List [Atom "real?", val]) = testValType env "real?" val
+eval env (List [Atom "string?", val]) = testValType env "string?" val
+eval env (List [Atom "symbol?", val]) = testValType env "symbol?" val
+eval env (List [Atom "vector?", val]) = testValType env "vector?" val
 
 {-| String functions -}
-eval (List [Atom "symbol->string", Atom val]) = return $ String val
-eval (List [Atom "string->symbol", String val]) = return $ Atom val
-eval (List [Atom "make-string", Number n, String c]) = return $ String $ take (round n) [(head c), (head c)..]
-eval (List [Atom "string-length", String val]) = return $ Number $ fromIntegral $ length val
-eval (List [Atom "string-ref", String val, Number k]) = return $ String $ [val !! (round k)]
-eval (List [Atom "string-set!", String val, Number k, String c]) =
-  return $ String $ take (round k) val ++ c ++ drop ((round k) + 1) val
-eval (List [Atom "substring", String val, Number s, Number e]) =
-  return $ String $ take ((round e) - (round s) + 1) (drop (round s) val)
-eval (List [Atom "string-append", String val1, String val2]) = return $ String $ val1 ++ val2
-eval (List [Atom "string->list", String val]) = return $ List $ map (\c -> String [c]) val
-eval (List [Atom "string-copy", String val]) = return $ String $ val
-eval (List [Atom "string-fill!", String val, String c]) = return $ String $ take (length val) (repeat (head c))
-eval (List [Atom "list->string", val]) = listToString val
+eval env (List [Atom "symbol->string", val]) = do
+  result <- eval env val
+  case result of
+    Atom x -> return $ String x
+    badForm  -> throwError $ BadSpecialForm "Argument is not a symbol" badForm
+    
+eval env (List [Atom "string->symbol", val]) = do
+  result <- eval env val
+  case result of
+    String x -> return $ Atom x
+    badForm  -> throwError $ BadSpecialForm "Argument is not a string" badForm
+    
+eval env (List [Atom "make-string", val1, val2]) = do
+  num <- eval env val1
+  chr <- eval env val2
+  case num of
+    Number n -> case chr of
+                   String c -> return $ String $ take (round n) [(head c), (head c)..]
+                   badForm  -> throwError $ BadSpecialForm "Second argument is not a string" badForm
+    badForm  -> throwError $ BadSpecialForm "First argument is not a number" badForm
+    
+eval env (List [Atom "string-length", val]) = do
+  result <- eval env val
+  case result of
+    String x -> return $ Number $ fromIntegral $ length x
+    badForm  -> throwError $ BadSpecialForm "Argument is not a string" badForm
+    
+eval env (List [Atom "string-ref", val, k]) =do
+  str <- eval env val
+  num <- eval env k
+  case str of
+    String s -> case num of
+                   Number n -> return $ String $ [s !! (round n)]
+                   badForm  -> throwError $ BadSpecialForm "Second argument is not a number" badForm
+    badForm  -> throwError $ BadSpecialForm "First argument is not a string" badForm
 
-eval (List [Atom "if", pred, conseq, alt]) = 
-     do result <- eval pred
-        case result of
-             Bool False -> eval alt
-             otherwise  -> eval conseq
-
-eval (List [Atom "only-if", pred, conseq, alt]) = 
-     do result <- eval pred
-        case result of
-             Bool True -> eval conseq
-             otherwise -> eval alt
-
-eval (List (Atom "cond" : clauses)) =
-     do
-        case find testClause clauses of
-          Just x  -> return $ case unpackList x of
-                                Left err -> Bool False
-                                Right (x : xs) -> xs !! 0
-          Nothing -> return $ Bool False
-        where testClause (List (x : xs)) =
-                case eval x of
-                  Right (Bool True) -> True
-                  otherwise -> False                              
-               
-eval (List (Atom "case" : keyVal : cases)) =
-     do
-        case find testCase cases of
-          Just x  -> return $ case unpackList x of
-                                Left err -> Bool False
-                                Right (x : xs) -> xs !! 0
-          Nothing -> return $ Bool False
-        where key = case eval keyVal of
-                      Right x -> x
-                      Left err -> Bool False
-                      
-              testTest t = case eqv [key, t] of
-                 Right (Bool True) -> True
-                 otherwise -> False
-
-              testCase (List ((Atom "else") : xs)) = True
-              testCase (List ((List x) : xs)) =
-                case find testTest x of
-                  Just _  -> True
-                  Nothing -> False                              
+eval env (List [Atom "string-set!", val, k, c]) = do
+  str1 <- eval env val
+  num  <- eval env k
+  str2 <- eval env c
+  case str1 of
+    String s1 -> case num of
+                   Number n -> case str2 of
+                                 String s2 -> return $ String $ take (round n) s1 ++ s2 ++ drop ((round n) + 1) s1
+                                 badForm  -> throwError $ BadSpecialForm "Third argument is not a string" badForm
+                   badForm  -> throwError $ BadSpecialForm "Second argument is not a number" badForm
+    badForm  -> throwError $ BadSpecialForm "First argument is not a string" badForm
+   
+eval env (List [Atom "substring", val, s, e]) = do
+  str  <- eval env val
+  num1 <- eval env s
+  num2 <- eval env e
+  case str of
+    String s -> case num1 of
+                  Number n1 -> case num2 of
+                                Number n2 -> return $ String $ take ((round n2) - (round n1) + 1)
+                                                                    (drop (round n1) s)
+                                badForm  -> throwError $ BadSpecialForm "Third argument is not a number" badForm
+                  badForm   -> throwError $ BadSpecialForm "Second argument is not a number" badForm
+    badForm  -> throwError $ BadSpecialForm "First argument is not a string" badForm
   
-eval (List (Atom func : args)) = mapM eval args >>= apply func
+eval env (List [Atom "string-append", val1, val2]) = do
+  str1 <- eval env val1
+  str2 <- eval env val2
+  case str1 of
+    String s1 -> case str2 of
+                   String s2 -> return $ String $ s1 ++ s2
+                   badForm  -> throwError $ BadSpecialForm "Second argument is not a string" badForm
+    badForm  -> throwError $ BadSpecialForm "First argument is not a string" badForm
+    
+eval env (List [Atom "string->list", val]) = do
+  result <- eval env val
+  case result of
+    String x -> return $ List $ map (\c -> String [c]) x
+    badForm  -> throwError $ BadSpecialForm "Argument is not a symbol" badForm
+    
+eval env (List [Atom "string-copy", val]) =  do
+  result <- eval env val
+  case result of
+    String x -> return $ String x
+    badForm  -> throwError $ BadSpecialForm "Argument is not a symbol" badForm
+    
+eval env (List [Atom "string-fill!", val, c]) =  do
+  str1 <- eval env val
+  str2 <- eval env c
+  case str1 of
+    String s1 -> case str2 of
+                   String s2 -> return $ String $ take (length s1) (repeat (head s2))
+                   badForm  -> throwError $ BadSpecialForm "Second argument is not a string" badForm
+    badForm  -> throwError $ BadSpecialForm "First argument is not a string" badForm
+    
+eval env (List [Atom "list->string", val]) = liftThrows $ listToString val
 
-eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
+eval env (List [Atom "if", pred, conseq, alt]) = do
+     result <- eval env pred
+     case result of
+       Bool False -> eval env alt
+       otherwise  -> eval env conseq
+
+eval env (List [Atom "only-if", pred, conseq, alt]) = do
+     result <- eval env pred
+     case result of
+       Bool True -> eval env conseq
+       otherwise -> eval env alt
+
+eval env (List (Atom "cond" : clauses)) = do
+  result <- findM testClause clauses
+  case result of
+    Just x  -> return $ case unpackList x of
+                          Left err -> Bool False
+                          Right (x : xs) -> xs !! 0
+    Nothing -> return $ Bool False
+   where testClause (List (x : xs)) = do
+           result <- eval env x
+           case result of
+             Bool True -> return $ True
+             otherwise -> return $ False                              
+               
+eval env (List (Atom "case" : key : cases)) = do
+  case find testCase cases of
+    Just x  -> return $ case unpackList x of
+                          Left err -> Bool False
+                          Right (x : xs) -> xs !! 0
+    Nothing -> return $ Bool False
+  where testTest t = case eqv [key, t] of
+                       Right (Bool True) -> True
+                       otherwise -> False
+        testCase (List ((Atom "else") : xs)) = True
+        testCase (List ((List x) : xs)) =
+           case find testTest x of
+              Just _  -> True
+              Nothing -> False                              
+
+eval env (List [Atom "set!", Atom var, form]) =
+     eval env form >>= setVar env var
+     
+eval env (List [Atom "define", Atom var, form]) =
+     eval env form >>= defineVar env var
+
+eval env (List (Atom func : args)) = mapM (eval env) args >>= liftThrows . apply func
+
+eval env badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
