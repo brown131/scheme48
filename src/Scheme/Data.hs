@@ -16,7 +16,10 @@ data LispVal = Atom String
              | Complex (Complex Double)
              | String String
              | Bool Bool
-
+             | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
+             | Func { params :: [String], vararg :: (Maybe String),
+                      body :: [LispVal], closure :: Env }
+               
 data LispError = NumArgs Integer [LispVal]
                | TypeMismatch String LispVal
                | Parser ParseError
@@ -33,3 +36,4 @@ type IOThrowsError = ExceptT LispError IO
 liftThrows :: ThrowsError a -> IOThrowsError a
 liftThrows (Left err) = throwError err
 liftThrows (Right val) = return val
+
