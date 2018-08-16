@@ -3,6 +3,7 @@ module Scheme.Data where
 import Control.Monad.Except
 import Data.Complex
 import Data.IORef
+import System.IO
 import Text.ParserCombinators.Parsec
 
 type Env = IORef [(String, IORef LispVal)]
@@ -19,6 +20,8 @@ data LispVal = Atom String
              | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
              | Func { params :: [String], vararg :: (Maybe String),
                       body :: [LispVal], closure :: Env }
+             | IOFunc ([LispVal] -> IOThrowsError LispVal)
+             | Port Handle
                
 data LispError = NumArgs Integer [LispVal]
                | TypeMismatch String LispVal
@@ -36,4 +39,3 @@ type IOThrowsError = ExceptT LispError IO
 liftThrows :: ThrowsError a -> IOThrowsError a
 liftThrows (Left err) = throwError err
 liftThrows (Right val) = return val
-

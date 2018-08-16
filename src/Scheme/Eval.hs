@@ -11,6 +11,7 @@ import Data.IORef
 import Scheme.Data
 import Scheme.Parser
 import System.Environment
+import System.IO
 import Text.ParserCombinators.Parsec hiding (spaces)
 
 isBound :: Env -> String -> IO Bool
@@ -75,7 +76,11 @@ showVal (Func {params = args, vararg = varargs, body = body, closure = env}) =
       (case varargs of
          Nothing -> ""
          Just arg -> " . " ++ arg) ++ ") ...)"
-      
+showVal (Port _)   = "<IO port>"
+showVal (IOFunc _) = "<IO primitive>"
+
+instance Show LispVal where show = showVal
+
 showError :: LispError -> String
 showError (UnboundVar message varname)  = message ++ ": " ++ varname
 showError (BadSpecialForm message form) = message ++ ": " ++ showVal form
@@ -86,6 +91,8 @@ showError (TypeMismatch expected found) = "Invalid type: expected " ++ expected
                                        ++ ", found " ++ showVal found
 showError (Parser parseErr)             = "Parse error at " ++ show parseErr
 showError (Default err)                 = "Error at " ++ show err
+
+instance Show LispError where show = showError
 
 {-| Evaluation -}
 
@@ -233,11 +240,51 @@ primitives = [("+", numericBinop (+)),
               ("eq?", eqv),
               ("eqv?", eqv),
               ("equal?", equal)]
-             
+
+ioPrimitives :: [(String, [LispVal] -> IOThrowsError LispVal)]
+ioPrimitives = [("apply", applyProc),
+                ("open-input-file", makePort ReadMode),
+                ("open-output-file", makePort WriteMode),
+                ("close-input-port", closePort),
+                ("close-output-port", closePort),
+                ("read", readProc),
+                ("write", writeProc),
+                ("read-contents", readContents),
+                ("read-all", readAll)]
+               
 primitiveBindings :: IO Env
-primitiveBindings = nullEnv >>= (flip bindVars $ map makePrimitiveFunc primitives)
-     where makePrimitiveFunc (var, func) = (var, PrimitiveFunc func)
-           
+primitiveBindings = nullEnv >>= (flip bindVars $ map (makeFunc IOFunc) ioPrimitives
+                                               ++ map (makeFunc PrimitiveFunc) primitives)
+     where makeFunc constructor (var, func) = (var, constructor func)
+
+applyProc :: [LispVal] -> IOThrowsError LispVal
+applyProc [func, List args] = apply func args
+applyProc (func : args)     = apply func args
+
+makePort :: IOMode -> [LispVal] -> IOThrowsError LispVal
+makePort mode [String filename] = liftM Port $ liftIO $ openFile filename mode
+
+closePort :: [LispVal] -> IOThrowsError LispVal
+closePort [Port port] = liftIO $ hClose port >> (return $ Bool True)
+closePort _           = return $ Bool False
+
+readProc :: [LispVal] -> IOThrowsError LispVal
+readProc []          = readProc [Port stdin]
+readProc [Port port] = (liftIO $ hGetLine port) >>= liftThrows . readExpr
+
+writeProc :: [LispVal] -> IOThrowsError LispVal
+writeProc [obj]            = writeProc [obj, Port stdout]
+writeProc [obj, Port port] = liftIO $ hPrint port obj >> return (Bool True)
+
+readContents :: [LispVal] -> IOThrowsError LispVal
+readContents [String filename] = liftM String $ liftIO $ readFile filename
+
+load :: String -> IOThrowsError [LispVal]
+load filename = (liftIO $ readFile filename) >>= liftThrows . readExprList
+
+readAll :: [LispVal] -> IOThrowsError LispVal
+readAll [String filename] = liftM List $ load filename
+
 apply :: LispVal -> [LispVal] -> IOThrowsError LispVal
 apply (PrimitiveFunc func) args = liftThrows $ func args
 apply (Func params varargs body closure) args =
@@ -250,6 +297,7 @@ apply (Func params varargs body closure) args =
             bindVarArgs arg env = case arg of
                 Just argName -> liftIO $ bindVars env [(argName, List $ remainingArgs)]
                 Nothing -> return env
+apply (IOFunc func) args = func args
 
 testValType :: Env -> String -> LispVal -> IOThrowsError LispVal
 testValType env "boolean?" val = do
@@ -495,6 +543,8 @@ eval env (List (Atom "lambda" : List params : body)) = makeNormalFunc env params
 eval env (List (Atom "lambda" : DottedList params varargs : body)) = makeVarArgs varargs env params body
      
 eval env (List (Atom "lambda" : varargs@(Atom _) : body)) = makeVarArgs varargs env [] body
+
+eval env (List [Atom "load", String filename]) = load filename >>= liftM last . mapM (eval env)
      
 eval env (List (function : args)) = do
      func <- eval env function
