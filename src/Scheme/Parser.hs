@@ -20,8 +20,21 @@ readOrThrow parser input = case parse parser "lisp" input of
     Right val -> return val
 
 readExpr = readOrThrow parseExpr
-readExprList = readOrThrow (endBy parseExpr spaces)
+readExprList = readOrThrow $ endBy parseExpr spaces
 
+{-| Parse Empty -}
+
+parseEmpty :: Parser LispVal
+parseEmpty = do
+               skipMany1 space
+               try parseExpr
+
+parseComment :: Parser LispVal
+parseComment = do
+                 char ';'
+                 manyTill anyChar (try (oneOf "\n\r"))
+                 try parseExpr
+               
 {-| Parse Symbols -}
 
 parseAtom :: Parser LispVal
@@ -147,19 +160,26 @@ parseBackquoted = do
     
 parseUnquoted :: Parser LispVal
 parseUnquoted = do
-                    char ','
-                    x <- parseExpr
-                    return $ List [Atom "unquote", x]
-    
+                  char ','
+                  x <- parseExpr
+                  return $ List [Atom "unquote", x]
+
+parseSExpr :: Parser LispVal
+parseSExpr = do
+               char '('
+               x <- try parseList <|> try parseDottedList
+               char ')'
+               return x
+                
 parseExpr :: Parser LispVal
-parseExpr = parseLiteral
+parseExpr = parseEmpty
+            <|> parseComment
+            <|> parseLiteral
             <|> parseNumber
             <|> parseString
             <|> parseQuoted
             <|> parseBackquoted
             <|> parseUnquoted
             <|> parseAtom
-            <|> do char '('
-                   x <- try parseList <|> try parseDottedList
-                   char ')'
-                   return x
+            <|> parseSExpr
+            <|> parseEmpty
